@@ -12,172 +12,140 @@ import (
 )
 
 var (
-	// Precompute the reflect.Type of error and http.Request
 	typeOfError = reflect.TypeOf((*error)(nil)).Elem()
 	typeOfRequest = reflect.TypeOf((*http.Request)(nil)).Elem()
 )
 
 type service struct {
-	name     string                    // name of service
-	rcvr     reflect.Value             // receiver of methods for the service
-	rcvrType reflect.Type              // type of the receiver
-	methods  map[string]*serviceMethod // registered methods
-	passReq  bool
+	name    string
+	rcvr    reflect.Value
+	typ     reflect.Type
+	methods map[string]*methodType
+	passReq bool
 }
 
-type serviceMethod struct {
-	method    reflect.Method // receiver method
-	argsType  reflect.Type   // type of the request argument
-	replyType reflect.Type   // type of the response argument
+type methodType struct {
+	method    reflect.Method
+	ArgsType  reflect.Type
+	ReplyType reflect.Type
 }
 
-// ----------------------------------------------------------------------------
-// serviceMap
-// ----------------------------------------------------------------------------
-
-// serviceMap is a registry for services.
 type serviceMap struct {
-	mutex    sync.Mutex
+	mu       sync.RWMutex
 	services map[string]*service
 }
 
-// register adds a new service using reflection to extract its methods.
-func (m *serviceMap) register(rcvr interface{}, name string, passReq bool) error {
+func (serviceMap *serviceMap) register(rcvr interface{}) error {
+	serviceMap.mu.Lock()
+	defer serviceMap.mu.Unlock()
+
 	if rcvr == nil {
-		return errors.New("rcvr is null")
+		return errors.New("rcvr is nil")
 	}
 
-	// Setup service.
+	name := reflect.TypeOf(rcvr).Elem().Name()
+	if name == "" {
+		return fmt.Errorf("rpc: no service name for type %q", name)
+	}
+
 	s := &service{
 		name:     name,
 		rcvr:     reflect.ValueOf(rcvr),
-		rcvrType: reflect.TypeOf(rcvr),
-		methods:  make(map[string]*serviceMethod),
-		//passReq:  passReq,
+		typ: reflect.TypeOf(rcvr),
+		methods:  make(map[string]*methodType),
 	}
 
-	if name == "" {
-		s.name = reflect.Indirect(s.rcvr).Type().Name()
-		if !isExported(s.name) {
-			return fmt.Errorf("rpc: type %q is not exported", s.name)
-		}
-	}
-	if s.name == "" {
-		return fmt.Errorf("rpc: no service name for type %q",
-			s.rcvrType.String())
-	}
-	fmt.Printf("check.. num:%d\n", s.rcvrType.NumMethod())
-
-	// Setup methods.
-	for i := 0; i < s.rcvrType.NumMethod(); i++ {
-		method := s.rcvrType.Method(i)
+	for i := 0; i < s.typ.NumMethod(); i++ {
+		method := s.typ.Method(i)
 		mtype := method.Type
-
-		fmt.Printf("method in %d\n", i)
-
-		// offset the parameter indexes by one if the
-		// service methods accept an HTTP request pointer
-		paramOffset := 1
 
 		// Method must be exported.
 		if method.PkgPath != "" {
-			fmt.Println("must be exported")
-			continue
-		}
-		// Method needs four ins: receiver, *http.Request, *args, *reply.
-		if mtype.NumIn() != 3 + paramOffset {
-			fmt.Println("need four ins")
 			continue
 		}
 
-		// If the service methods accept an HTTP request pointer
-		//if passReq {
-		// First argument must be a pointer and must be http.Request.
+		offset := 1
+
+		// Method needs four ins: receiver, *http.Request, *args, *reply
+		if mtype.NumIn() != 3 + offset {
+			return errors.New("need four ins")
+		}
+
+		// First argument must be  *http.Request
 		reqType := mtype.In(1)
 		if reqType.Kind() != reflect.Ptr || reqType.Elem() != typeOfRequest {
-			fmt.Println("first must bre pointer")
-			continue
+			return errors.New("First argument must be http.Request")
 		}
-		//}
-		// Next argument must be a pointer and must be exported.
-		args := mtype.In(1 + paramOffset)
+		// Second argument must be *args and must be exported
+		args := mtype.In(1 + offset)
 		if args.Kind() != reflect.Ptr || !isExportedOrBuiltin(args) {
-			fmt.Println("next arg must be Pointer")
-			continue
+			return errors.New("Second argument must be Pointer")
 		}
-		// Next argument must be a pointer and must be exported.
-		reply := mtype.In(2 + paramOffset)
+		// Third argument must be *reply and must be exported
+		reply := mtype.In(2 + offset)
 		if reply.Kind() != reflect.Ptr || !isExportedOrBuiltin(reply) {
-			fmt.Println("3rd arg must be pointer")
-			continue
+			return errors.New("Third argument must be pointer")
 		}
-		// Method needs one out: error.
+
+		// Method return value must be a error
 		if mtype.NumOut() != 1 {
-			fmt.Println("need error")
-			continue
+			return errors.New("Method return value must be a error")
 		}
 		if returnType := mtype.Out(0); returnType != typeOfError {
-			fmt.Println("error type")
-			continue
+			return errors.New("error type")
 		}
-		s.methods[method.Name] = &serviceMethod{
+		s.methods[method.Name] = &methodType{
 			method:    method,
-			argsType:  args.Elem(),
-			replyType: reply.Elem(),
+			ArgsType:  args.Elem(),
+			ReplyType: reply.Elem(),
 		}
 	}
-	if len(s.methods) == 0 {
-		return fmt.Errorf("rpc: %q has no exported methods of suitable type",
-			s.name)
-	}
-	// Add to the map.
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	if m.services == nil {
-		m.services = make(map[string]*service)
-	} else if _, ok := m.services[s.name]; ok {
+
+	if serviceMap.services == nil {
+		serviceMap.services = make(map[string]*service)
+	} else if _, ok := serviceMap.services[s.name]; ok {
 		return fmt.Errorf("rpc: service already defined: %q", s.name)
 	}
-	m.services[s.name] = s
+	serviceMap.services[s.name] = s
+
 	return nil
 }
 
-// get returns a registered service given a method name.
-//
-// The method name uses a dotted notation as in "Service.Method".
-func (m *serviceMap) get(method string) (*service, *serviceMethod, error) {
+func (serviceMap *serviceMap) Get(method string) (*service, *methodType, error) {
 	parts := strings.Split(method, ".")
 	if len(parts) != 2 {
-		err := fmt.Errorf("rpc: service/method request ill-formed: %q", method)
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("invalid request: %q", method)
 	}
-	m.mutex.Lock()
-	service := m.services[parts[0]]
-	m.mutex.Unlock()
+	serviceMap.mu.Lock()
+	service := serviceMap.services[parts[0]]
+	serviceMap.mu.Unlock()
 	if service == nil {
-		err := fmt.Errorf("rpc: can't find service %q", method)
+		err := fmt.Errorf("service not found: %q", method)
 		return nil, nil, err
 	}
 	serviceMethod := service.methods[parts[1]]
 	if serviceMethod == nil {
-		err := fmt.Errorf("rpc: can't find method %q", method)
+		err := fmt.Errorf("method not found: %q", method)
 		return nil, nil, err
 	}
 	return service, serviceMethod, nil
 }
 
-// isExported returns true of a string is an exported (upper case) name.
+func (m *serviceMap) HasMethod(method string) bool {
+	if _, _, err := m.Get(method); err == nil {
+		return true
+	}
+	return false
+}
+
 func isExported(name string) bool {
 	r, _ := utf8.DecodeRuneInString(name)
 	return unicode.IsUpper(r)
 }
 
-// isExportedOrBuiltin returns true if a type is exported or a builtin.
 func isExportedOrBuiltin(t reflect.Type) bool {
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
-	// PkgPath will be non-empty even for an exported type,
-	// so we need to check the type name as well.
 	return isExported(t.Name()) || t.PkgPath() == ""
 }
