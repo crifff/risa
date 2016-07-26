@@ -12,13 +12,11 @@ const (
 	InternalError ErrorCode = -32603
 )
 
-type Params map[string]interface{}
-
 type Request struct {
 	JsonRPC string `json:"jsonrpc"`
 	Method  string `json:"method"`
-	Params  Params `json:"params"`
-	ID      string `json:"id"`
+	Params  interface{} `json:"params"`
+	ID      int `json:"id"`
 }
 
 type BatchRequest struct {
@@ -26,9 +24,13 @@ type BatchRequest struct {
 }
 
 type Error struct {
-	Code    int    `json:"code"`
+	Code    ErrorCode    `json:"code"`
 	Message string `json:"message"`
 	Data    interface{} `json:"data"`
+}
+
+func (e Error) Error() string {
+	return e.Message
 }
 
 type Response struct {
@@ -36,4 +38,12 @@ type Response struct {
 	Result  string  `json:"result"`
 	Error   *Error  `json:"error"`
 	ID      string  `json:"id"`
+}
+
+func ValidateRequest(r Request) error {
+	//jsonrpc MUST be exactly "2.0"
+	if version := r.JsonRPC; version != "2.0" {
+		return Error{Code:InvalidRequestError, Message:"Invalid Request"}
+	}
+	return nil
 }
