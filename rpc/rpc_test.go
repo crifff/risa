@@ -50,35 +50,35 @@ func (e *ExportType6) Get(*http.Request, *ExportArgs, *noExportReply) error {
 }
 
 func TestRegister(t *testing.T) {
-	s := serviceMap{}
+	s := ServiceMap{}
 	var err error
 
-	if err = s.register(nil); err == nil {
+	if err = s.Register(nil); err == nil {
 		t.Error(err)
 	}
 
 	// no export Type id ignored
-	if err = s.register(new(noExportType)); err != nil {
+	if err = s.Register(new(noExportType)); err != nil {
 		t.Error(err)
 	}
 
-	if err = s.register(new(ExportType2)); err == nil {
+	if err = s.Register(new(ExportType2)); err == nil {
 		t.Error(err)
 	}
-	if err = s.register(new(ExportType3)); err == nil {
+	if err = s.Register(new(ExportType3)); err == nil {
 		t.Error(err)
 	}
-	if err = s.register(new(ExportType4)); err == nil {
+	if err = s.Register(new(ExportType4)); err == nil {
 		t.Error(err)
 	}
-	if err = s.register(new(ExportType5)); err == nil {
+	if err = s.Register(new(ExportType5)); err == nil {
 		t.Error(err)
 	}
-	if err = s.register(new(ExportType6)); err == nil {
+	if err = s.Register(new(ExportType6)); err == nil {
 		t.Error(err)
 	}
 
-	if err = s.register(new(ExportType1)); err != nil {
+	if err = s.Register(new(ExportType1)); err != nil {
 		t.Error(err)
 	}
 	if s.HasMethod("ExportType1.Get") == false {
@@ -88,8 +88,8 @@ func TestRegister(t *testing.T) {
 
 func TestGet(t *testing.T) {
 
-	s := serviceMap{}
-	if err := s.register(new(ExportType1)); err != nil {
+	s := ServiceMap{}
+	if err := s.Register(new(ExportType1)); err != nil {
 		t.Error(err)
 	}
 

@@ -30,12 +30,16 @@ type methodType struct {
 	ReplyType reflect.Type
 }
 
-type serviceMap struct {
+type ServiceMap struct {
 	mu       sync.RWMutex
 	services map[string]*service
 }
 
-func (serviceMap *serviceMap) register(rcvr interface{}) error {
+func NewServiceMap() *ServiceMap {
+	return &ServiceMap{}
+}
+
+func (serviceMap *ServiceMap) Register(rcvr interface{}) error {
 	serviceMap.mu.Lock()
 	defer serviceMap.mu.Unlock()
 
@@ -106,12 +110,39 @@ func (serviceMap *serviceMap) register(rcvr interface{}) error {
 	} else if _, ok := serviceMap.services[s.name]; ok {
 		return fmt.Errorf("rpc: service already defined: %q", s.name)
 	}
+	//fmt.Printf("register %s \n", s.name)
 	serviceMap.services[s.name] = s
 
 	return nil
 }
 
-func (serviceMap *serviceMap) Get(method string) (*service, *methodType, error) {
+func (serviceMap *ServiceMap) Call(method string, r *http.Request) (reflect.Value, error) {
+	var errValue []reflect.Value
+
+	service, methodSpec, errGet := serviceMap.Get(method)
+	if errGet != nil {
+		return reflect.Value{}, errGet
+	}
+	args := reflect.New(methodSpec.ArgsType)
+	reply := reflect.New(methodSpec.ReplyType)
+
+	errValue = methodSpec.method.Func.Call([]reflect.Value{
+		service.rcvr,
+		reflect.ValueOf(r),
+		args,
+		reply,
+	})
+
+	errV := errValue[0].Interface()
+	if errV != nil {
+		if err := errV.(error); err != nil {
+			return reflect.Value{}, err
+		}
+	}
+	return reply, nil
+}
+
+func (serviceMap *ServiceMap) Get(method string) (*service, *methodType, error) {
 	parts := strings.Split(method, ".")
 	if len(parts) != 2 {
 		return nil, nil, fmt.Errorf("invalid request: %q", method)
@@ -131,7 +162,7 @@ func (serviceMap *serviceMap) Get(method string) (*service, *methodType, error) 
 	return service, serviceMethod, nil
 }
 
-func (m *serviceMap) HasMethod(method string) bool {
+func (m *ServiceMap) HasMethod(method string) bool {
 	if _, _, err := m.Get(method); err == nil {
 		return true
 	}

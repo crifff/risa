@@ -33,13 +33,13 @@ func TestServeHTTP(t *testing.T) {
 
 	var resp *http.Response
 	resp = post(s.URL, `{"jsonrpc":"2.0"}`)
-	if resp.StatusCode != 200 {
-		t.Error()
+	if resp.StatusCode != 500 {
+		t.Error(resp.StatusCode)
 	}
 
 	resp = post(s.URL, `[{"jsonrpc":"2.0"}, {"jsonrpc":"2.0"}]`)
-	if resp.StatusCode != 200 {
-		t.Error()
+	if resp.StatusCode != 500 {
+		t.Error(resp.StatusCode)
 	}
 
 }
