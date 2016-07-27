@@ -9,6 +9,9 @@ import (
 	"net/http"
 	"strings"
 	"errors"
+	"hoshina85/risa/jsonrpc2"
+	//"encoding/json"
+	"encoding/json"
 )
 
 var (
@@ -116,15 +119,25 @@ func (serviceMap *ServiceMap) Register(rcvr interface{}) error {
 	return nil
 }
 
-func (serviceMap *ServiceMap) Call(method string, r *http.Request) (reflect.Value, error) {
+func readRequestBody(x interface{}, req jsonrpc2.Request) error {
+	if x == nil {
+		return nil
+	}
+	var params [1]interface{}
+	params[0] = x
+	return json.Unmarshal(*req.Params, &params)
+}
+func (serviceMap *ServiceMap) Call(req jsonrpc2.Request, r *http.Request) (reflect.Value, error) {
 	var errValue []reflect.Value
 
+	method := req.Method
 	service, methodSpec, errGet := serviceMap.Get(method)
 	if errGet != nil {
 		return reflect.Value{}, errGet
 	}
 	args := reflect.New(methodSpec.ArgsType)
 	reply := reflect.New(methodSpec.ReplyType)
+	readRequestBody(args.Interface(), req)
 
 	errValue = methodSpec.method.Func.Call([]reflect.Value{
 		service.rcvr,

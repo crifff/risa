@@ -9,14 +9,14 @@ import (
 
 type noExportType struct{}
 
-type ExportArgs struct{}
+type ExportArgs struct{ Name string }
 type noExportArgs struct{}
 type ExportReply struct{}
 type noExportReply struct{}
 type ExportType1 struct{}
 
 func (e *ExportType1) Get(r *http.Request, arg *ExportArgs, reply *ExportReply) error {
-	return errors.New("return by ExportType1.Get")
+	return errors.New("return by ExportType1.Get from " + arg.Name)
 }
 
 type ExportType2 struct{}
@@ -95,8 +95,8 @@ func TestGet(t *testing.T) {
 
 	r, _ := http.NewRequest("POST", "", nil)
 	var errValue []reflect.Value
-	args := reflect.New(reflect.TypeOf(ExportArgs{}))
-	reply := reflect.New(reflect.TypeOf(ExportReply{}))
+	args := reflect.ValueOf(&ExportArgs{Name:"John"})
+	reply := reflect.ValueOf(&ExportReply{})
 	service, methodSpec, _ := s.Get("ExportType1.Get")
 	errValue = methodSpec.method.Func.Call([]reflect.Value{
 		service.rcvr,
@@ -105,7 +105,7 @@ func TestGet(t *testing.T) {
 		reply,
 	})
 	err := errValue[0].Interface().(error)
-	if err.Error() != "return by ExportType1.Get" {
+	if err.Error() != "return by ExportType1.Get from John" {
 		t.Error(err)
 	}
 }

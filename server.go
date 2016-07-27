@@ -10,6 +10,7 @@ import (
 	"hoshina85/risa/rpc"
 	"fmt"
 	"github.com/go-openapi/errors"
+	"gopkg.in/guregu/null.v3"
 )
 
 type JsonRPCServer struct {
@@ -39,7 +40,14 @@ func (s *JsonRPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if rdr1.Read(firstChar); string(firstChar) == "[" {
 		requests, err := batchRequest(rdr2)
 		if err != nil {
-			http.Error(w, "Bad Request", http.StatusBadRequest)
+			response := responseError(jsonrpc2.ParseError, "")
+			writeResponse(w, response)
+			return
+		}
+		if len(requests) == 0 {
+			response := responseError(jsonrpc2.InvalidRequestError, "")
+			writeResponse(w, response)
+			return
 		}
 		cnt := len(requests)
 
@@ -51,49 +59,47 @@ func (s *JsonRPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			responses[i] = response
 		}
-		json, _ := json.Marshal(responses)
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, string(json))
+		writeResponse(w, responses)
 	} else {
-
 		req, err := request(rdr2)
 		if err != nil {
-			http.Error(w, "Bad Request", http.StatusBadRequest)
+			response := responseError(jsonrpc2.ParseError, req.ID)
+			writeResponse(w, response)
+			return
 		}
 
 		response, errExecute := s.execute(req, r)
-
 		if errExecute != nil {
 			http.Error(w, "Bad Request", http.StatusInternalServerError)
-
 		}
-		json, _ := json.Marshal(response)
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, string(json))
-
+		writeResponse(w, response)
 	}
 }
+
 func (s *JsonRPCServer) execute(req jsonrpc2.Request, r *http.Request) (jsonrpc2.Response, error) {
 
 	if err := jsonrpc2.ValidateRequest(req); err != nil {
-		//http.Error(w, "Bad Request", http.StatusBadRequest)
 		return jsonrpc2.Response{}, errors.New(http.StatusBadRequest, "Bad Request")
 	}
+	if s.ServiceMap.HasMethod(req.Method) == false {
+		response := responseError(jsonrpc2.MethodNotFoundError, req.ID)
+		return response, nil
+	}
 
-	reply, errCall := s.ServiceMap.Call(req.Method, r)
+	reply, errCall := s.ServiceMap.Call(req, r)
 	if errCall != nil {
 		return jsonrpc2.Response{}, errors.New(http.StatusBadRequest, "Bad Request")
 	}
-	jsonReply, _ := json.Marshal(reply.Elem().Interface())
 
 	response := jsonrpc2.Response{
 		JsonRPC:jsonrpc2.Version,
-		Result: string(jsonReply),
+		Result: reply.Elem().Interface(),
 		Error: nil,
-		ID: "",
+		ID: null.NewString(req.ID, req.ID != ""),
 	}
 	return response, nil
 }
+
 func request(reader io.ReadCloser) (jsonrpc2.Request, error) {
 	var req jsonrpc2.Request
 
@@ -120,4 +126,26 @@ func batchRequest(reader io.ReadCloser) ([]jsonrpc2.Request, error) {
 
 func (s *JsonRPCServer) Register(service interface{}) error {
 	return s.ServiceMap.Register(service)
+}
+
+func responseError(code jsonrpc2.ErrorCode, id string) jsonrpc2.Response {
+	response := jsonrpc2.Response{
+		JsonRPC:jsonrpc2.Version,
+		Error: &jsonrpc2.Error{
+			Code:code,
+			Message:jsonrpc2.ErrorMessage[code],
+		},
+		ID: null.NewString(id, id != ""),
+	}
+	return response
+}
+
+func writeResponse(w http.ResponseWriter, response interface{}) error {
+	json, err := json.Marshal(response)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_, errPrint := fmt.Fprint(w, string(json))
+	return errPrint
 }
