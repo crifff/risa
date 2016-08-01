@@ -1,16 +1,16 @@
 package risa
 
 import (
-	"net/http"
-	"encoding/json"
-	"hoshina85/risa/jsonrpc2"
-	"io/ioutil"
 	"bytes"
-	"io"
-	"hoshina85/risa/rpc"
+	"encoding/json"
 	"fmt"
 	"github.com/go-openapi/errors"
+	"github.com/hoshina85/risa/jsonrpc2"
+	"github.com/hoshina85/risa/rpc"
 	"gopkg.in/guregu/null.v3"
+	"io"
+	"io/ioutil"
+	"net/http"
 )
 
 type JsonRPCServer struct {
@@ -92,10 +92,10 @@ func (s *JsonRPCServer) execute(req jsonrpc2.Request, r *http.Request) (jsonrpc2
 	}
 
 	response := jsonrpc2.Response{
-		JsonRPC:jsonrpc2.Version,
-		Result: reply.Elem().Interface(),
-		Error: nil,
-		ID: null.NewString(req.ID, req.ID != ""),
+		JsonRPC: jsonrpc2.Version,
+		Result:  reply.Elem().Interface(),
+		Error:   nil,
+		ID:      null.NewString(req.ID, req.ID != ""),
 	}
 	return response, nil
 }
@@ -130,10 +130,10 @@ func (s *JsonRPCServer) Register(service interface{}) error {
 
 func responseError(code jsonrpc2.ErrorCode, id string) jsonrpc2.Response {
 	response := jsonrpc2.Response{
-		JsonRPC:jsonrpc2.Version,
+		JsonRPC: jsonrpc2.Version,
 		Error: &jsonrpc2.Error{
-			Code:code,
-			Message:jsonrpc2.ErrorMessage[code],
+			Code:    code,
+			Message: jsonrpc2.ErrorMessage[code],
 		},
 		ID: null.NewString(id, id != ""),
 	}

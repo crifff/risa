@@ -1,21 +1,21 @@
 package rpc
 
 import (
-	"reflect"
-	"sync"
-	"fmt"
-	"unicode/utf8"
-	"unicode"
-	"net/http"
-	"strings"
 	"errors"
-	"hoshina85/risa/jsonrpc2"
+	"fmt"
+	"net/http"
+	"reflect"
+	"strings"
+	"sync"
+	"unicode"
+	"unicode/utf8"
 	//"encoding/json"
 	"encoding/json"
+	"github.com/hoshina85/risa/jsonrpc2"
 )
 
 var (
-	typeOfError = reflect.TypeOf((*error)(nil)).Elem()
+	typeOfError   = reflect.TypeOf((*error)(nil)).Elem()
 	typeOfRequest = reflect.TypeOf((*http.Request)(nil)).Elem()
 )
 
@@ -56,10 +56,10 @@ func (serviceMap *ServiceMap) Register(rcvr interface{}) error {
 	}
 
 	s := &service{
-		name:     name,
-		rcvr:     reflect.ValueOf(rcvr),
-		typ: reflect.TypeOf(rcvr),
-		methods:  make(map[string]*methodType),
+		name:    name,
+		rcvr:    reflect.ValueOf(rcvr),
+		typ:     reflect.TypeOf(rcvr),
+		methods: make(map[string]*methodType),
 	}
 
 	for i := 0; i < s.typ.NumMethod(); i++ {
@@ -74,7 +74,7 @@ func (serviceMap *ServiceMap) Register(rcvr interface{}) error {
 		offset := 1
 
 		// Method needs four ins: receiver, *http.Request, *args, *reply
-		if mtype.NumIn() != 3 + offset {
+		if mtype.NumIn() != 3+offset {
 			return errors.New("need four ins")
 		}
 
