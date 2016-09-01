@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/go-openapi/errors"
 	"github.com/hoshina85/risa/jsonrpc2"
 	"github.com/hoshina85/risa/rpc"
 	"gopkg.in/guregu/null.v3"
 	"io"
 	"io/ioutil"
 	"net/http"
+	"github.com/pkg/errors"
+	"os"
 )
 
 type JsonRPCServer struct {
@@ -40,12 +41,12 @@ func (s *JsonRPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if rdr1.Read(firstChar); string(firstChar) == "[" {
 		requests, err := batchRequest(rdr2)
 		if err != nil {
-			response := responseError(jsonrpc2.ParseError, "")
+			response := responseError(jsonrpc2.ParseError, "", err)
 			writeResponse(w, response)
 			return
 		}
 		if len(requests) == 0 {
-			response := responseError(jsonrpc2.InvalidRequestError, "")
+			response := responseError(jsonrpc2.InvalidRequestError, "", errors.New("request is blank"))
 			writeResponse(w, response)
 			return
 		}
@@ -55,7 +56,7 @@ func (s *JsonRPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for i, req := range requests {
 			response, errExecute := s.execute(req, r)
 			if errExecute != nil {
-				http.Error(w, "Bad Request", http.StatusInternalServerError)
+				response = responseError(jsonrpc2.InternalError, req.ID, errExecute)
 			}
 			responses[i] = response
 		}
@@ -63,14 +64,16 @@ func (s *JsonRPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else {
 		req, err := request(rdr2)
 		if err != nil {
-			response := responseError(jsonrpc2.ParseError, req.ID)
+			response := responseError(jsonrpc2.ParseError, req.ID, err)
 			writeResponse(w, response)
 			return
 		}
 
 		response, errExecute := s.execute(req, r)
 		if errExecute != nil {
-			http.Error(w, "Bad Request", http.StatusInternalServerError)
+			response := responseError(jsonrpc2.InternalError, req.ID, err)
+			writeResponse(w, response)
+			return
 		}
 		writeResponse(w, response)
 	}
@@ -79,16 +82,16 @@ func (s *JsonRPCServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *JsonRPCServer) execute(req jsonrpc2.Request, r *http.Request) (jsonrpc2.Response, error) {
 
 	if err := jsonrpc2.ValidateRequest(req); err != nil {
-		return jsonrpc2.Response{}, errors.New(http.StatusBadRequest, "Bad Request")
+		return jsonrpc2.Response{}, errors.Wrap(err, "Request Invalid")
 	}
 	if s.ServiceMap.HasMethod(req.Method) == false {
-		response := responseError(jsonrpc2.MethodNotFoundError, req.ID)
+		response := responseError(jsonrpc2.MethodNotFoundError, req.ID, errors.New("Request not found"))
 		return response, nil
 	}
 
 	reply, errCall := s.ServiceMap.Call(req, r)
 	if errCall != nil {
-		return jsonrpc2.Response{}, errors.New(http.StatusBadRequest, "Bad Request")
+		return jsonrpc2.Response{}, errors.Wrap(errCall, "Failed Execute")
 	}
 
 	response := jsonrpc2.Response{
@@ -128,24 +131,30 @@ func (s *JsonRPCServer) Register(service interface{}) error {
 	return s.ServiceMap.Register(service)
 }
 
-func responseError(code jsonrpc2.ErrorCode, id string) jsonrpc2.Response {
+func responseError(code jsonrpc2.ErrorCode, id string, e error) jsonrpc2.Response {
+	rpcError := &jsonrpc2.Error{
+		Code:    code,
+		Message: jsonrpc2.ErrorMessage[code],
+	}
+	if e != nil && os.Getenv("RISA_RETURN_STACKTRACE") != "" {
+		rpcError.Data = map[string]string{
+			"stacktrace":fmt.Sprintf("%#+v", e),
+		}
+	}
 	response := jsonrpc2.Response{
 		JsonRPC: jsonrpc2.Version,
-		Error: &jsonrpc2.Error{
-			Code:    code,
-			Message: jsonrpc2.ErrorMessage[code],
-		},
+		Error: rpcError,
 		ID: null.NewString(id, id != ""),
 	}
 	return response
 }
 
 func writeResponse(w http.ResponseWriter, response interface{}) error {
-	json, err := json.Marshal(response)
+	jsonStr, err := json.Marshal(response)
 	if err != nil {
 		return err
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_, errPrint := fmt.Fprint(w, string(json))
+	_, errPrint := fmt.Fprint(w, string(jsonStr))
 	return errPrint
 }

@@ -10,6 +10,7 @@ import (
 	//"fmt"
 	//"encoding/json"
 	//"hoshina85/risa/jsonrpc2"
+	"github.com/pkg/errors"
 )
 
 type HelloArgs struct {
@@ -25,6 +26,10 @@ type HelloService struct {
 func (s *HelloService) Get(t *http.Request, args *HelloArgs, reply *HelloReply) error {
 	reply.Message = "Hello " + args.Name + "!"
 	return nil
+}
+
+func (s *HelloService) Error(t *http.Request, args *HelloArgs, reply *HelloReply) error {
+	return errors.New("return error")
 }
 
 func TestNewJsonRPCServer(t *testing.T) {
@@ -63,7 +68,6 @@ func TestBatchRequest(t *testing.T) {
 	req1, _ := http.NewRequest("POST", s.URL, strings.NewReader(payload))
 	client := &http.Client{}
 	resp, errDo := client.Do(req1)
-	//fmt.Println(resp.Body)
 	if errDo != nil {
 		t.Error(errDo.Error())
 	}
@@ -126,4 +130,28 @@ func TestFailBatchRequest(t *testing.T) {
 		t.Errorf("Data Error. %s", string(body2))
 	}
 
+}
+
+func TestServerError(t *testing.T) {
+	rpcHandler := NewJsonRPCServer()
+	errRegister := rpcHandler.Register(new(HelloService))
+	if errRegister != nil {
+		t.Error(errRegister.Error())
+	}
+	s := httptest.NewServer(rpcHandler)
+	defer s.Close()
+	payload := `{"jsonrpc":"2.0","method":"HelloService.Error","params":[{"Name":"John"}], "id":"1"}`
+	req1, _ := http.NewRequest("POST", s.URL, strings.NewReader(payload))
+	client := &http.Client{}
+	resp, errDo := client.Do(req1)
+	if errDo != nil {
+		t.Error(errDo.Error())
+	}
+	if resp.StatusCode != 200 {
+		t.Error()
+	}
+	body, _ := ioutil.ReadAll(resp.Body);
+	if `{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error"},"id":"1"}` != string(body) {
+		t.Errorf("Data Error. %s", string(body))
+	}
 }
